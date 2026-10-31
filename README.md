@@ -1,0 +1,2 @@
+# Simulador de Sistema de Arquivos (OS)
+Simulador em Python focado na camada lógica e física de um disco, demonstrando a estratégia de Alocação Indexada (i-node), mapeamento de blocos e cálculo de fragmentação interna/externa.

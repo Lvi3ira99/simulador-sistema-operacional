@@ -207,7 +207,7 @@ class FileSystem:
 
 
 # -------------------------------------------------------------
-# EXECUÇÃO DO SIMULADOR (Demonstração Automática)
+# INTERAÇÃO COM O SIMULADOR
 # -------------------------------------------------------------
 if __name__ == "__main__":
     fs = FileSystem()

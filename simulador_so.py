@@ -211,12 +211,38 @@ class FileSystem:
 # -------------------------------------------------------------
 if __name__ == "__main__":
     fs = FileSystem()
+    print("Simulador de Arquivos (i-node). Digite 'ajuda' para ver os comandos.")
     
-    # Exemplo 1.1 — Criação e Exibição da Árvore
-    fs.mkdir("/sistema")
-    fs.mkdir("/sistema/logs")
-    fs.create_file("/sistema/logs/app.log", 10)
-    fs.tree()
-    
-    # Exemplo 1.2 — Alocação Indexada e Diagnóstico
-    fs.fs_status()
+    while True:
+        try:
+            entrada = input("\nsimulador> ").strip().split()
+            if not entrada:
+                continue
+                
+            comando = entrada[0].lower()
+            
+            if comando == "sair":
+                print("Encerrando simulador...")
+                break
+            elif comando == "mkdir" and len(entrada) == 2:
+                fs.mkdir(entrada[1])
+            elif comando == "create" and len(entrada) == 3:
+                fs.create_file(entrada[1], float(entrada[2]))
+            elif comando == "rm" and len(entrada) == 2:
+                fs.rm(entrada[1])
+            elif comando == "tree":
+                fs.tree()
+            elif comando == "status":
+                fs.fs_status()
+            elif comando == "ajuda":
+                print("Comandos disponíveis:")
+                print("  mkdir <caminho>           - Cria um diretório (ex: mkdir /docs)")
+                print("  create <caminho> <tamanho>- Cria um arquivo em KB (ex: create /docs/arq.txt 5)")
+                print("  rm <caminho>              - Deleta um arquivo/diretório (ex: rm /docs/arq.txt)")
+                print("  tree                      - Mostra a árvore de diretórios")
+                print("  status                    - Mostra o mapa do disco e fragmentação")
+                print("  sair                      - Fecha o simulador")
+            else:
+                print("Comando inválido ou incompleto. Digite 'ajuda'.")
+        except Exception as e:
+            print(f"Erro ao processar comando: {e}")

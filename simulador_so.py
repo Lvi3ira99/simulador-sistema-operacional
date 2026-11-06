@@ -1,17 +1,21 @@
 import math
+from os import path
 
+# =====================================================================
+# CAMADA FÍSICA: DISCO LÓGICO E HARDWARE
+# =====================================================================
 class Disk:
-    def __init__(self, total_blocks=16, block_size=4096):
+    """Representa a visão lógica do disco gerenciada pelo Sistema de Arquivos"""
+    def __init__(self, total_blocks=32, block_size=4096):
         self.total_blocks = total_blocks
         self.block_size = block_size
         self.free_count = total_blocks
-        # Representação física do disco
         self.blocks = [{"type": "LIVRE", "info": ""} for _ in range(total_blocks)]
 
     def allocate_blocks(self, count):
-        """Busca blocos livres e os aloca (Alocação Indexada não exige que sejam contíguos)"""
+        """Busca blocos livres e os aloca (Alocação Indexada não contígua)"""
         if count > self.free_count:
-            return None # Espaço insuficiente
+            return None 
         
         allocated = []
         for i in range(self.total_blocks):
@@ -24,11 +28,86 @@ class Disk:
         return allocated
 
     def free_blocks(self, block_indices):
-        """Libera os blocos especificados"""
         for i in block_indices:
             self.blocks[i] = {"type": "LIVRE", "info": ""}
             self.free_count += 1
 
+class DiskScheduler:
+    """Simula o firmware/SO ordenando a fila de requisições de E/S (SSTF)"""
+    def __init__(self, current_head_position=15):
+        # Posição inicial arbitrária da cabeça de leitura
+        self.head_position = current_head_position
+
+    def schedule_sstf(self, requests_queue):
+        if not requests_queue:
+            return
+
+        print(f"\n[E/S] Requisições pendentes nas trilhas (blocos físicos): {requests_queue}")
+        print(f"Posição atual da cabeça de leitura: Trilha {self.head_position}")
+        print("--- ESCALONAMENTO DE DISCO: SSTF (Shortest Seek Time First) ---")
+
+        pending = list(requests_queue)
+        current_pos = self.head_position
+        path = []
+        math_steps = []
+        total_movement = 0
+
+        while pending:
+            # Encontra a trilha mais próxima
+            closest_track = min(pending, key=lambda track: abs(track - current_pos))
+            distance = abs(closest_track - current_pos)
+            
+            path.append(str(closest_track))
+            math_steps.append(f"|{current_pos}-{closest_track}|")
+            total_movement += distance
+            
+            current_pos = closest_track
+            pending.remove(closest_track)
+
+        initial_pos = self.head_position
+        self.head_position = current_pos
+
+        print(f"Ordem de Atendimento  : {initial_pos} -> " + " -> ".join(path))
+        print(f"Deslocamento da Cabeça: " + " + ".join(math_steps))
+        print(f"Total de Movimento    : {total_movement} trilhas deslocadas\n")
+
+class RAID5Controller:
+    """Abstrai discos físicos implementando RAID 5 (Striping + Paridade)"""
+    def __init__(self, num_disks=3):
+        self.num_disks = num_disks
+        self.physical_disks = {1: {}, 2: {}, 3: {}}
+
+    def write_data(self, filename, data_blocks):
+        print(f"[RAID 5] Gravando dados físicos de '{filename}' nos discos...")
+        
+        # Agrupa os blocos de dados de 2 em 2 (pois o 3º disco guarda a paridade)
+        for i in range(0, len(data_blocks), 2):
+            b1 = data_blocks[i]
+            # Se houver um número ímpar de blocos, o segundo será Nulo
+            b2 = data_blocks[i+1] if i+1 < len(data_blocks) else "NULO"
+            
+            # Distribui nos discos (Striping)
+            self.physical_disks[1][b1] = f"Dado {filename} (Bloco Lógico {b1})"
+            self.physical_disks[2][b2] = f"Dado {filename} (Bloco Lógico {b2})"
+            
+            # Paridade no 3º Disco (XOR Lógico)
+            self.physical_disks[3][f"P({b1},{b2})"] = f"XOR({b1}, {b2})"
+            
+            print(f" -> Disco 1: [Bloco {b1}] | Disco 2: [Bloco {b2}] | Disco 3: [PARIDADE XOR({b1},{b2})]")
+
+    def simulate_failure(self):
+        print("\n[RAID 5 - TESTE DE FALHA SIMULADO]")
+        print("- Falha catastrófica forçada no Disco 2!")
+        self.physical_disks[2].clear() # Queima o disco 2
+
+        print("- Iniciando processo de Reconstrução (Rebuild)...")
+        print("- Lendo Dados do Disco 1 e Paridades do Disco 3...")
+        print("- Calculando via XOR (Disco 1 XOR Disco 3) = Dados do Disco 2...")
+        print("- Reconstrução concluída com sucesso! Disco 2 online novamente.\n")
+
+# =====================================================================
+# CAMADA LÓGICA: SISTEMA DE ARQUIVOS
+# =====================================================================
 class Node:
     """Representa um Arquivo ou Diretório na Árvore Hierárquica"""
     def __init__(self, name, is_dir, parent=None, size_bytes=0):
@@ -43,32 +122,28 @@ class Node:
 
 class FileSystem:
     def __init__(self):
-        self.disk = Disk(total_blocks=16, block_size=4096)
-        self.root = Node("/", is_dir=True)
+        self.disk = Disk(total_blocks=32, block_size=4096)
+        self.scheduler = DiskScheduler()
+        self.raid = RAID5Controller()
         
-        # Alocando um i-node para o diretório raiz para simular a tabela
+        self.root = Node("/", is_dir=True)
         root_blocks = self.disk.allocate_blocks(1)
         self.root.inode_block = root_blocks[0]
-        self.disk.blocks[self.root.inode_block] = {
-            "type": "[INODE_RAIZ]", 
-            "info": "Diretório '/'"
-        }
+        self.disk.blocks[self.root.inode_block] = {"type": "[INODE_RAIZ]", "info": "Diretório '/'"}
 
     def _resolve_path(self, path):
-        """Navega na árvore e retorna o nó correspondente ao caminho"""
         if path == "/": return self.root
-        curr = self.root if path.startswith("/") else self.root # Simplificação para caminhos absolutos
+        curr = self.root
         parts = [p for p in path.split("/") if p]
         
         for part in parts:
             if part in curr.children:
                 curr = curr.children[part]
             else:
-                return None, part, curr # Retorna o nó pai caso o filho não exista
+                return None, part, curr
         return curr, None, None
 
     def mkdir(self, path):
-        """CRUD - Create: Cria um diretório"""
         node, missing, parent = self._resolve_path(path)
         if node:
             print(f"Erro: O diretório '{path}' já existe.")
@@ -79,64 +154,51 @@ class FileSystem:
         print(f"> Diretório '{path}' criado com sucesso.")
 
     def create_file(self, path, size_kb):
-        """CRUD - Create: Cria um arquivo com tamanho específico"""
+        """CRUD - Create Integrado com E/S e RAID"""
         node, missing, parent = self._resolve_path(path)
         if node:
             print(f"Erro: O arquivo '{path}' já existe.")
             return
         
+        # 1. CÁLCULO LÓGICO DE ARMAZENAMENTO
         size_bytes = int(size_kb * 1024)
         data_blocks_needed = math.ceil(size_bytes / self.disk.block_size)
-        total_blocks_needed = data_blocks_needed + 1 # +1 para o bloco de i-node
+        total_blocks_needed = data_blocks_needed + 1 # +1 do i-node
         
         blocks = self.disk.allocate_blocks(total_blocks_needed)
         if not blocks:
-            print("Erro: Espaço insuficiente no disco.")
+            print("Erro: Espaço insuficiente no disco lógico.")
             return
 
+        # 2. CRIAÇÃO DO NÓ E ALOCAÇÃO LÓGICA (I-NODE)
         new_file = Node(missing, is_dir=False, parent=parent, size_bytes=size_bytes)
         new_file.inode_block = blocks[0]
         new_file.data_blocks = blocks[1:]
         parent.children[missing] = new_file
 
-        # Gravando no Disco
         tag = missing.split('.')[0].upper()
-        self.disk.blocks[new_file.inode_block] = {
-            "type": f"[INODE_{tag}]", 
-            "info": f"Arquivo '{path}'"
-        }
+        self.disk.blocks[new_file.inode_block] = {"type": f"[INODE_{tag}]", "info": f"Arquivo '{path}'"}
 
         bytes_remaining = size_bytes
         for i, b_idx in enumerate(new_file.data_blocks):
             used_in_block = min(bytes_remaining, self.disk.block_size)
             bytes_remaining -= used_in_block
-            self.disk.blocks[b_idx] = {
-                "type": "[DADO]",
-                "info": f"'{path}' (Bloco {i+1} - {used_in_block} bytes ocupados)"
-            }
-            # Cálculo da fragmentação interna no último bloco
+            self.disk.blocks[b_idx] = {"type": "[DADO]", "info": f"'{path}' ({used_in_block} bytes)"}
             if bytes_remaining == 0:
                 new_file.internal_frag = self.disk.block_size - used_in_block
 
-        print(f"> Arquivo '{path}' ({size_kb}KB) criado com sucesso.")
+        # 3. INTEGRAÇÃO: ACIONANDO O HARDWARE (E/S E RAID)
+        print("\n[SO] Traduzindo requisição lógica em operações físicas...")
+        
+        # Escalonador define o movimento mecânico da agulha para os blocos de dados alocados
+        self.scheduler.schedule_sstf(new_file.data_blocks)
+        
+        # RAID espalha fisicamente os dados nos HDDs reais
+        self.raid.write_data(missing, new_file.data_blocks)
 
-    def rm(self, path):
-        """CRUD - Delete: Remove arquivo ou diretório"""
-        node, _, _ = self._resolve_path(path)
-        if not node or node.name == "/":
-            print("Erro: Caminho inválido.")
-            return
-        
-        # Libera os blocos se for arquivo
-        if not node.is_dir:
-            blocks_to_free = [node.inode_block] + node.data_blocks
-            self.disk.free_blocks(blocks_to_free)
-        
-        del node.parent.children[node.name]
-        print(f"> '{path}' deletado com sucesso.")
+        print(f"\n> Sucesso! Arquivo '{path}' ({size_kb}KB) criado, escalonado e gravado no RAID.")
 
     def tree(self):
-        """CRUD - Read: Exibe a hierarquia visualmente"""
         print("\n[ÁRVORE DO SISTEMA DE ARQUIVOS]")
         print("/")
         self._print_tree(self.root, "", True)
@@ -149,100 +211,50 @@ class FileSystem:
                 print(f"{prefix}{marker}{node.name}/ [DIR]")
             else:
                 size_kb = node.size_bytes / 1024
-                size_str = f"{int(size_kb)} KB" if size_kb.is_integer() else f"{size_kb:.1f} KB"
-                print(f"{prefix}{marker}{node.name} ({size_str}) [ARQ]")
+                print(f"{prefix}{marker}{node.name} ({size_kb:.1f} KB) [ARQ]")
             prefix += "    " if is_last else "│   "
 
         children = list(node.children.values())
         for i, child in enumerate(children):
             self._print_tree(child, prefix, i == len(children) - 1)
 
-    def fs_status(self):
-        """Diagnóstico do Disco"""
-        print(f"Tamanho do Bloco de Disco: {self.disk.block_size // 1024} KB | "
-              f"Total de Blocos: {self.disk.total_blocks} ({self.disk.total_blocks * self.disk.block_size // 1024} KB)\n")
-        print("[MAPA DE ALOCAÇÃO DO DISCO (Indexado)]")
-        
-        i = 0
-        while i < self.disk.total_blocks:
-            if self.disk.blocks[i]["type"] == "LIVRE":
-                start = i
-                while i < self.disk.total_blocks and self.disk.blocks[i]["type"] == "LIVRE":
-                    i += 1
-                end = i - 1
-                if start == end:
-                    print(f"Bloco {start:02d}               : [LIVRE]")
-                else:
-                    print(f"Bloco {start:02d}..{end:02d}           : [LIVRE]")
-            else:
-                b = self.disk.blocks[i]
-                print(f"Bloco {i:02d} {b['type']:13s} : {b['info']}")
-                i += 1
-
-        print("\n--- RELATÓRIO DE FRAGMENTAÇÃO ---")
-        total_internal_frag = 0
-        files = self._get_all_files(self.root)
-        
-        for f in files:
-            alocado = len(f.data_blocks) * self.disk.block_size
-            total_internal_frag += f.internal_frag
-            perc = (f.internal_frag / self.disk.block_size) * 100 if f.internal_frag > 0 else 0
-            
-            print(f"Arquivo '{f.name}':")
-            print(f"  Tamanho Real          : {f.size_bytes} bytes ({f.size_bytes//1024} KB)")
-            print(f"  Espaço Alocado (Dados): {alocado} bytes ({len(f.data_blocks)} blocos)")
-            print(f"  Fragmentação Interna  : {f.internal_frag} bytes ({perc:.0f}% de desperdício no último bloco)")
-            
-        print(f"Fragmentação Externa    : 0 bytes (Evitada pelo modelo de i-node indexado)")
-        print(f"Necessidade de Compactação: NÃO (Blocos alocados via i-node indexado permitem fragmentação física sem impacto lógico)")
-        print("-" * 33 + "\n")
-
-    def _get_all_files(self, node):
-        files = []
-        if not node.is_dir:
-            files.append(node)
-        for child in node.children.values():
-            files.extend(self._get_all_files(child))
-        return files
-
-
-# -------------------------------------------------------------
-# INTERAÇÃO COM O SIMULADOR
-# -------------------------------------------------------------
+# =====================================================================
+# CLI - INTERAÇÃO COM O USUÁRIO
+# =====================================================================
 if __name__ == "__main__":
     fs = FileSystem()
-    print("Simulador de Arquivos (i-node). Digite 'ajuda' para ver os comandos.")
+    print("=== Simulador de SO: FS + E/S + RAID ===")
+    print("\nDigite 'ajuda' para ver os comandos.")
     
     while True:
         try:
             entrada = input("\nsimulador> ").strip().split()
-            if not entrada:
-                continue
+            if not entrada: continue
                 
             comando = entrada[0].lower()
             
             if comando == "sair":
-                print("Encerrando simulador...")
+                print("Encerrando simulador de SO...")
                 break
             elif comando == "mkdir" and len(entrada) == 2:
                 fs.mkdir(entrada[1])
             elif comando == "create" and len(entrada) == 3:
+                # O comando create agora faz TODAS as etapas do SO!
                 fs.create_file(entrada[1], float(entrada[2]))
-            elif comando == "rm" and len(entrada) == 2:
-                fs.rm(entrada[1])
             elif comando == "tree":
                 fs.tree()
-            elif comando == "status":
-                fs.fs_status()
+            elif comando == "fail_disk":
+                # Testa a recuperação do RAID 5
+                fs.raid.simulate_failure()
             elif comando == "ajuda":
                 print("Comandos disponíveis:")
-                print("  mkdir <caminho>           - Cria um diretório (ex: mkdir /docs)")
-                print("  create <caminho> <tamanho>- Cria um arquivo em KB (ex: create /docs/arq.txt 5)")
-                print("  rm <caminho>              - Deleta um arquivo/diretório (ex: rm /docs/arq.txt)")
-                print("  tree                      - Mostra a árvore de diretórios")
-                print("  status                    - Mostra o mapa do disco e fragmentação")
-                print("  sair                      - Fecha o simulador")
+                print("  mkdir <caminho>          - Cria pasta (ex: mkdir /docs)")
+                print("  create <caminho> <KB>    - Cria arquivo (Aloca i-node + SSTF + RAID)")
+                print("                             Ex: create /docs/video.mp4 15")
+                print("  fail_disk                - Simula quebra e rebuild no RAID 5")
+                print("  tree                     - Mostra árvore de diretórios")
+                print("  sair                     - Fecha simulador")
             else:
-                print("Comando inválido ou incompleto. Digite 'ajuda'.")
+                print("Comando inválido. Digite 'ajuda'.")
         except Exception as e:
             print(f"Erro ao processar comando: {e}")

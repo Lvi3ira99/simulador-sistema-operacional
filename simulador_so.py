@@ -251,7 +251,7 @@ if __name__ == "__main__":
                 print("  mkdir <caminho>          - Cria pasta (ex: mkdir /docs)")
                 print("  create <caminho> <KB>    - Cria arquivo (Aloca i-node + SSTF + RAID)")
                 print("                             Ex: create /docs/video.mp4 15")
-                print("  fail_disk                - Simula quebra e rebuild no RAID 5")
+                print("  fail_disk                - Simula quebra e reconstrução no RAID 5")
                 print("  tree                     - Mostra árvore de diretórios")
                 print("  sair                     - Fecha simulador")
             else:
